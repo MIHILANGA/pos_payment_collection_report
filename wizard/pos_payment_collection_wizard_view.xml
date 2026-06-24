@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_pos_payment_collection_wizard_form" model="ir.ui.view">
+        <field name="name">pos.payment.collection.wizard.form</field>
+        <field name="model">pos.payment.collection.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Payment Collection Excel Report">
+                <group>
+                    <group>
+                        <field name="date_start"/>
+                        <field name="all_reps"/>
+                    </group>
+                    <group>
+                        <field name="date_stop"/>
+                        <field name="sales_rep_id" invisible="all_reps" required="not all_reps"/>
+                    </group>
+                </group>
+                <footer>
+                    <button name="action_generate_excel_report" string="Generate Report" type="object" class="btn-primary"/>
+                    <button string="Cancel" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_pos_payment_collection_wizard" model="ir.actions.act_window">
+        <field name="name">Payment Collection Report</field>
+        <field name="res_model">pos.payment.collection.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+    <menuitem id="menu_pos_payment_collection_report"
+              name="Payment Collection Excel Report"
+              parent="point_of_sale.menu_point_rep"
+              action="action_pos_payment_collection_wizard"
+              sequence="60"/>
+</odoo>
