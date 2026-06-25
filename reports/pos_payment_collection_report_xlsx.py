@@ -94,9 +94,13 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         date_start = wizard.date_start
         date_stop = wizard.date_stop
         all_reps = wizard.all_reps
+        all_invoices = wizard.all_invoices
         sales_rep = wizard.sales_rep_id
 
+        # Write Title
         worksheet.write('A2', 'Payment Collection Report', title_format)
+
+        # Write Meta Filters
         worksheet.write('A4', 'Select Date :', meta_label_format)
         worksheet.write('B4', date_start.strftime('%Y-%m-%d') if date_start else '', meta_value_format)
         worksheet.write('C4', date_stop.strftime('%Y-%m-%d') if date_stop else '', meta_value_format)
@@ -105,7 +109,10 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         worksheet.write('B5', sales_rep.name if (sales_rep and not all_reps) else 'All', meta_value_format)
         worksheet.write('C5', 'All Rep :', meta_label_format)
         worksheet.write('D5', 'Yes' if all_reps else 'No', meta_value_format)
+        worksheet.write('E5', 'All Invoices :', meta_label_format)
+        worksheet.write('F5', 'Yes' if all_invoices else 'No', meta_value_format)
 
+        # Write Headers
         headers = [
             'Rep Name', 'Customer Name', 'Invoice Date', 'Invoice Name',
             'Invoice Amount', 'Cash Collection', 'Cheque Collection', 'Due Amount'
@@ -117,6 +124,7 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         worksheet.set_row(row, 25)
         row += 1
 
+        # Timezone conversion for POS order datetime matching
         user_tz = self.env.user.tz or 'UTC'
         local_tz = pytz.timezone(user_tz)
 
@@ -126,6 +134,7 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         end_local = local_tz.localize(datetime.datetime.combine(date_stop, datetime.time.max))
         end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
 
+        # Fetch POS Orders
         pos_domain = [
             ('date_order', '>=', start_utc),
             ('date_order', '<=', end_utc),
@@ -133,6 +142,8 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         ]
         if not all_reps and sales_rep:
             pos_domain.append(('config_id', '=', sales_rep.id))
+        if not all_invoices:
+            pos_domain.append(('account_move', '=', False))
 
         orders = self.env['pos.order'].search(pos_domain, order='date_order asc')
 

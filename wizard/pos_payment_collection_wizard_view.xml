@@ -9,6 +9,7 @@
                     <group>
                         <field name="date_start"/>
                         <field name="all_reps"/>
+                        <field name="all_invoices"/>
                     </group>
                     <group>
                         <field name="date_stop"/>

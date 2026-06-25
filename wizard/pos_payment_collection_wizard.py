@@ -19,6 +19,10 @@ class PosPaymentCollectionWizard(models.TransientModel):
         string='All Reps',
         default=False
     )
+    all_invoices = fields.Boolean(
+        string='All Invoices',
+        default=False
+    )
     sales_rep_id = fields.Many2one(
         'pos.config',
         string='Rep / Session Config'
@@ -42,6 +46,7 @@ class PosPaymentCollectionWizard(models.TransientModel):
             'date_start': self.date_start,
             'date_stop': self.date_stop,
             'all_reps': self.all_reps,
+            'all_invoices': self.all_invoices,
             'sales_rep_id': self.sales_rep_id.id if self.sales_rep_id else False,
             'sales_rep_name': self.sales_rep_id.name if self.sales_rep_id else '',
         }
