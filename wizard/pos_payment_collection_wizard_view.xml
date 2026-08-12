@@ -10,6 +10,7 @@
                         <field name="date_start"/>
                         <field name="all_reps"/>
                         <field name="all_invoices"/>
+                        <field name="report_type" widget="radio"/>
                     </group>
                     <group>
                         <field name="date_stop"/>

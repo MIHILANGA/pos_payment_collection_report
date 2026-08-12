@@ -95,6 +95,9 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         date_stop = wizard.date_stop
         all_reps = wizard.all_reps
         all_invoices = wizard.all_invoices
+        report_type = getattr(wizard, 'report_type', 'direct')
+        pos_orders_opt = report_type in ('pos', 'both')
+        direct_payments_opt = report_type in ('direct', 'both')
         sales_rep = wizard.sales_rep_id
 
         # Write Title
@@ -124,109 +127,115 @@ class PosPaymentCollectionReportXlsx(models.AbstractModel):
         worksheet.set_row(row, 25)
         row += 1
 
-        # Timezone conversion for POS order datetime matching
-        user_tz = self.env.user.tz or 'UTC'
-        local_tz = pytz.timezone(user_tz)
-
-        start_local = local_tz.localize(datetime.datetime.combine(date_start, datetime.time.min))
-        start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
-
-        end_local = local_tz.localize(datetime.datetime.combine(date_stop, datetime.time.max))
-        end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
-
-        # Fetch POS Orders
-        pos_domain = [
-            ('date_order', '>=', start_utc),
-            ('date_order', '<=', end_utc),
-            ('state', 'in', ['paid', 'done', 'invoiced']),
-        ]
-        if not all_reps and sales_rep:
-            pos_domain.append(('config_id', '=', sales_rep.id))
-        if not all_invoices:
-            pos_domain.append(('account_move', '=', False))
-
-        orders = self.env['pos.order'].search(pos_domain, order='date_order asc')
-
-        payment_domain = [
-            ('date', '>=', date_start),
-            ('date', '<=', date_stop),
-            ('payment_type', '=', 'inbound'),
-            ('partner_type', '=', 'customer'),
-            ('state', 'in', ['posted', 'in_process', 'paid']),
-        ]
-
-        if not all_reps and sales_rep:
-            rep_name = sales_rep.name
-            matching_users = self.env['res.users'].search([('name', '=', rep_name)])
-            payment_domain.append(('create_uid', 'in', matching_users.ids))
-        else:
-            configs = self.env['pos.config'].search([])
-            config_names = configs.mapped('name')
-            matching_users = self.env['res.users'].search([('name', 'in', config_names)])
-            payment_domain.append(('create_uid', 'in', matching_users.ids))
-
-        payments = self.env['account.payment'].search(payment_domain, order='date asc')
-
         report_rows = []
 
-        for order in orders:
-            cash_amount = 0.0
-            cheque_amount = 0.0
-            for pay in order.payment_ids:
-                pay_method = pay.payment_method_id
-                pay_name = pay_method.name or ''
-                
-                is_credit = False
-                if pay_method.journal_id:
-                    name_lower = pay_name.lower()
-                    if 'credit' in name_lower and 'card' not in name_lower:
+        # Fetch POS Orders if enabled
+        if pos_orders_opt:
+            # Timezone conversion for POS order datetime matching
+            user_tz = self.env.user.tz or 'UTC'
+            local_tz = pytz.timezone(user_tz)
+
+            start_local = local_tz.localize(datetime.datetime.combine(date_start, datetime.time.min))
+            start_utc = start_local.astimezone(pytz.utc).replace(tzinfo=None)
+
+            end_local = local_tz.localize(datetime.datetime.combine(date_stop, datetime.time.max))
+            end_utc = end_local.astimezone(pytz.utc).replace(tzinfo=None)
+
+            pos_domain = [
+                ('date_order', '>=', start_utc),
+                ('date_order', '<=', end_utc),
+                ('state', 'in', ['paid', 'done', 'invoiced']),
+            ]
+            if not all_reps and sales_rep:
+                pos_domain.append(('config_id', '=', sales_rep.id))
+            if not all_invoices:
+                pos_domain.append(('account_move', '=', False))
+
+            orders = self.env['pos.order'].search(pos_domain, order='date_order asc')
+
+            for order in orders:
+                cash_amount = 0.0
+                cheque_amount = 0.0
+                for pay in order.payment_ids:
+                    pay_method = pay.payment_method_id
+                    pay_name = pay_method.name or ''
+                    
+                    is_credit = False
+                    if pay_method.journal_id:
+                        name_lower = pay_name.lower()
+                        if 'credit' in name_lower and 'card' not in name_lower:
+                            is_credit = True
+                        elif 'receivable' in name_lower:
+                            is_credit = True
+                    else:
                         is_credit = True
-                    elif 'receivable' in name_lower:
-                        is_credit = True
+
+                    if is_credit:
+                        continue 
+
+                    if pay_method.journal_id.type == 'cash':
+                        cash_amount += pay.amount
+                    else:
+                        cheque_amount += pay.amount
+
+                if order.account_move:
+                    due_amount = order.account_move.amount_residual
                 else:
-                    is_credit = True
+                    due_amount = order.amount_total - cash_amount - cheque_amount
 
-                if is_credit:
-                    continue 
+                local_date = fields.Datetime.context_timestamp(self, order.date_order).date()
+                inv_date = order.account_move.invoice_date if order.account_move else local_date
 
-                if pay_method.journal_id.type == 'cash':
-                    cash_amount += pay.amount
-                else:
-                    cheque_amount += pay.amount
+                report_rows.append({
+                    'rep_name': order.config_id.name or '',
+                    'customer_name': order.partner_id.name or '',
+                    'invoice_date': inv_date,
+                    'invoice_name': order.account_move.name or order.name or '',
+                    'invoice_amount': order.amount_total,
+                    'cash_collection': cash_amount,
+                    'cheque_collection': cheque_amount,
+                    'due_amount': due_amount,
+                })
 
-            if order.account_move:
-                due_amount = order.account_move.amount_residual
+        # Fetch Direct Payments if enabled
+        if direct_payments_opt:
+            payment_domain = [
+                ('date', '>=', date_start),
+                ('date', '<=', date_stop),
+                ('payment_type', '=', 'inbound'),
+                ('partner_type', '=', 'customer'),
+                ('state', 'in', ['posted', 'in_process', 'paid']),
+            ]
+
+            if 'app_payment_id' in self.env['account.payment']._fields:
+                payment_domain.append(('app_payment_id', '!=', False))
+
+            if not all_reps and sales_rep:
+                rep_name = sales_rep.name
+                matching_users = self.env['res.users'].search([('name', '=', rep_name)])
+                payment_domain.append(('create_uid', 'in', matching_users.ids))
             else:
-                due_amount = order.amount_total - cash_amount - cheque_amount
+                configs = self.env['pos.config'].search([])
+                config_names = configs.mapped('name')
+                matching_users = self.env['res.users'].search([('name', 'in', config_names)])
+                payment_domain.append(('create_uid', 'in', matching_users.ids))
 
-            local_date = fields.Datetime.context_timestamp(self, order.date_order).date()
-            inv_date = order.account_move.invoice_date if order.account_move else local_date
+            payments = self.env['account.payment'].search(payment_domain, order='date asc')
 
-            report_rows.append({
-                'rep_name': order.config_id.name or '',
-                'customer_name': order.partner_id.name or '',
-                'invoice_date': inv_date,
-                'invoice_name': order.account_move.name or order.name or '',
-                'invoice_amount': order.amount_total,
-                'cash_collection': cash_amount,
-                'cheque_collection': cheque_amount,
-                'due_amount': due_amount,
-            })
+            for payment in payments:
+                cash_col = payment.amount if payment.journal_id.type == 'cash' else 0.0
+                cheque_col = payment.amount if payment.journal_id.type != 'cash' else 0.0
 
-        for payment in payments:
-            cash_col = payment.amount if payment.journal_id.type == 'cash' else 0.0
-            cheque_col = payment.amount if payment.journal_id.type != 'cash' else 0.0
-
-            report_rows.append({
-                'rep_name': payment.create_uid.name or '',
-                'customer_name': payment.partner_id.name or '',
-                'invoice_date': payment.date,
-                'invoice_name': payment.name or '',
-                'invoice_amount': payment.amount,
-                'cash_collection': cash_col,
-                'cheque_collection': cheque_col,
-                'due_amount': 0.0,
-            })
+                report_rows.append({
+                    'rep_name': payment.create_uid.name or '',
+                    'customer_name': payment.partner_id.name or '',
+                    'invoice_date': payment.date,
+                    'invoice_name': payment.name or '',
+                    'invoice_amount': payment.amount,
+                    'cash_collection': cash_col,
+                    'cheque_collection': cheque_col,
+                    'due_amount': 0.0,
+                })
         report_rows.sort(key=lambda r: (r['invoice_date'] or datetime.date.min, r['invoice_name'] or ''))
 
         total_inv_amount = 0.0
